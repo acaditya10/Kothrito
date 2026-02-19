@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check admin status
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == "acadityachandra@gmail.com";
+    }
+    
+    // Users collection: users can read/write their own profile, admin has full access
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isAdmin();
+    }
+    
+    // Settings collection: anyone can read, only admin can write
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Riders collection: uses lowercased email as the document ID
+    match /riders/{emailId} {
+      allow read: if request.auth != null;
+      // Rider can update their own status if the doc ID matches their auth email
+      allow update: if request.auth != null && request.auth.token.email.lower() == emailId;
+      allow write: if isAdmin();
+    }
+    
+    // Orders collection
+    match /orders/{orderId} {
+      // Anyone authenticated can read (riders need to see pending jobs, users need to see their own)
+      allow read: if request.auth != null;
+      
+      // Users can create orders if the userId field matches their auth uid
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      
+      // Riders can update orders to accept or complete them
+      allow update: if request.auth != null;
+      
+      allow delete: if isAdmin();
+    }
+  }
+}
