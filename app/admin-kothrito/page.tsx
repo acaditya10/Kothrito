@@ -128,6 +128,21 @@ export default function AdminDashboard() {
     });
   }, [isAdmin]);
 
+  const handleAddRider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRider.name || !newRider.email) return;
+    await setDoc(doc(db, "riders", newRider.email.toLowerCase()), {
+      name: newRider.name,
+      email: newRider.email,
+      phone: newRider.phone,
+      role: 'rider',
+      riderStatus: false,
+      createdAt: serverTimestamp()
+    });
+    setShowAddRider(false);
+    setNewRider({ name: "", email: "", phone: "" });
+  };
+
   const downloadCSV = () => {
     const headers = ["ID", "Status", "User", "Phone", "Service", "Price", "Pickup", "Drop", "Date"];
     const rows = history.map((o: any) => [
@@ -662,6 +677,39 @@ export default function AdminDashboard() {
         )}
 
       </div> {/* CLOSING MAIN CONTENT DIV */}
+
+      {/* --- ADD RIDER MODAL --- */}
+      {showAddRider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-black dark:text-white">New Rider</h3>
+              <button onClick={() => setShowAddRider(false)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-500 hover:text-slate-800 dark:hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddRider} className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Full Name</label>
+                <input required type="text" value={newRider.name} onChange={e => setNewRider({ ...newRider, name: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 text-sm font-bold dark:text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all" placeholder="John Doe" />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Email Address</label>
+                <input required type="email" value={newRider.email} onChange={e => setNewRider({ ...newRider, email: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 text-sm font-bold dark:text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all" placeholder="rider@kothrito.com" />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Phone Number</label>
+                <input required type="tel" value={newRider.phone} onChange={e => setNewRider({ ...newRider, phone: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 text-sm font-bold dark:text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all" placeholder="+91 9876543210" />
+              </div>
+              <button type="submit" className="w-full bg-orange-500 text-white font-black uppercase tracking-widest text-xs py-4 rounded-2xl mt-2 active:scale-95 transition-transform">
+                Create Account
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }
