@@ -9,8 +9,8 @@ import { successChimeSound, errorBeepSound } from '@/lib/sounds';
 import Branding from '@/components/Branding';
 
 // Firebase Imports
-import { auth, db, googleProvider } from '@/lib/firebase';
-import { signInWithPopup, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { auth, db } from '@/lib/firebase';
+import { signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, addDoc, serverTimestamp, onSnapshot, query, where, updateDoc } from 'firebase/firestore';
 
 // Dynamically import Map (Leaflet is client-side only)
@@ -41,6 +41,7 @@ export default function Home() {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingOrder, setPendingOrder] = useState<any>(null);
 
   const { hapticLight, hapticMedium, hapticSuccess, hapticError } = useHaptics();
   const [playSuccess] = useSound(successChimeSound, { volume: 0.5 });
@@ -60,10 +61,10 @@ export default function Home() {
           setProfile(userDoc.data());
           setShowOnboarding(false);
         } else {
-          setName(u.displayName || "");
-          setShowOnboarding(true);
+          setName("");
         }
       } else {
+        signInAnonymously(auth).catch((e) => console.error("Anon Login Failed", e));
         setUser(null);
         setProfile(null);
       }
@@ -105,11 +106,9 @@ export default function Home() {
   }, [user]);
 
   // --- HANDLERS ---
-  const handleAuthAction = async () => {
-    if (!user) {
-      try {
-        await signInWithPopup(auth, googleProvider);
-      } catch (error) { console.error(error); }
+  const handleAuthAction = () => {
+    if (!profile) {
+      setShowOnboarding(true);
     } else {
       setShowLogout(!showLogout);
     }
@@ -129,8 +128,34 @@ export default function Home() {
     window.location.reload();
   };
 
+  const submitFinalOrder = async (pickup: any, drop: any, pAddr: string, dAddr: string, exactPrice: number, pName: string, pPhone: string) => {
+    if (!user || !selectedService) return;
+    hapticMedium();
+    try {
+      await addDoc(collection(db, "orders"), {
+        userId: user.uid,
+        userName: pName,
+        userPhone: pPhone,
+        status: "pending",
+        serviceType: selectedService.id,
+        price: exactPrice,
+        pickup: { lat: pickup.lat, lng: pickup.lng, address: pAddr },
+        drop: { lat: drop.lat, lng: drop.lng, address: dAddr },
+        createdAt: serverTimestamp(),
+      });
+      setShowMap(false);
+      setSelectedService(null);
+      setPendingOrder(null);
+      hapticSuccess();
+      playSuccess();
+    } catch (e) {
+      hapticError();
+      playError();
+      alert("Error placing order");
+    }
+  };
+
   const saveProfile = async () => {
-    // Basic validation: strip all non-digits
     const digits = phone.replace(/\D/g, '');
     let finalPhone = phone;
     if (digits.length === 10) {
@@ -143,11 +168,15 @@ export default function Home() {
 
     if (!user || finalPhone.length < 13) return alert("Enter a valid phone number");
     setIsSaving(true);
-    const data = { name, phone: finalPhone, email: user.email, uid: user.uid, updatedAt: new Date() };
+    const data = { name, phone: finalPhone, uid: user.uid, updatedAt: new Date() };
     await setDoc(doc(db, "users", user.uid), data);
     setProfile(data);
     setShowOnboarding(false);
     setIsSaving(false);
+
+    if (pendingOrder) {
+      await submitFinalOrder(pendingOrder.pickup, pendingOrder.drop, pendingOrder.pAddr, pendingOrder.dAddr, pendingOrder.exactPrice, data.name, data.phone);
+    }
   };
 
   const submitRating = async () => {
@@ -164,31 +193,15 @@ export default function Home() {
   };
 
   const handleOrderSubmission = async (pickup: any, drop: any, pAddr: string, dAddr: string, exactPrice: number) => {
-    if (!user || !profile || !selectedService) return;
+    if (!user || !selectedService) return;
 
-    hapticMedium();
-
-    try {
-      await addDoc(collection(db, "orders"), {
-        userId: user.uid,
-        userName: profile.name,
-        userPhone: profile.phone,
-        status: "pending",
-        serviceType: selectedService.id,
-        price: exactPrice,
-        pickup: { lat: pickup.lat, lng: pickup.lng, address: pAddr },
-        drop: { lat: drop.lat, lng: drop.lng, address: dAddr },
-        createdAt: serverTimestamp(),
-      });
-      setShowMap(false);
-      setSelectedService(null);
-      hapticSuccess();
-      playSuccess();
-    } catch (e) {
-      hapticError();
-      playError();
-      alert("Error placing order");
+    if (!profile) {
+      setPendingOrder({ pickup, drop, pAddr, dAddr, exactPrice });
+      setShowOnboarding(true);
+      return;
     }
+
+    await submitFinalOrder(pickup, drop, pAddr, dAddr, exactPrice, profile.name, profile.phone);
   };
 
   // --- CONDITIONAL RENDERING ---
@@ -226,10 +239,10 @@ export default function Home() {
               <button onClick={handleLogout} className="bg-red-500 text-white px-4 py-1.5 rounded-full text-[10px] font-black animate-in fade-in zoom-in duration-200 shadow-lg cursor-pointer z-50">LOGOUT?</button>
             )}
             <button onClick={handleAuthAction} className={`flex items-center gap-2 px-3 py-1.5 rounded-full active:scale-95 transition-all border ${showLogout ? 'bg-slate-900 border-slate-900 text-white' : 'bg-slate-50 border-slate-100 text-slate-700'}`}>
-              {user ? (
-                <><div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${showLogout ? 'bg-white text-black' : 'bg-orange-500 text-white'}`}>{user.displayName?.[0]}</div><span className="text-xs font-bold">{user.displayName?.split(' ')[0]}</span></>
+              {profile ? (
+                <><div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${showLogout ? 'bg-white text-black' : 'bg-orange-500 text-white'}`}>{profile.name?.[0]?.toUpperCase()}</div><span className="text-xs font-bold">{profile.name?.split(' ')[0]}</span></>
               ) : (
-                <><LogIn size={14} /><span className="text-xs font-bold">Login</span></>
+                <><User size={14} /><span className="text-xs font-bold">Profile</span></>
               )}
             </button>
           </div>
@@ -246,7 +259,7 @@ export default function Home() {
 
         <div className="px-6 mt-6 shrink-0 z-20 flex justify-between gap-3">
           {services.map((s) => (
-            <div key={s.id} onClick={() => { hapticLight(); if (user) { setSelectedService(s); setShowMap(true); } else handleAuthAction(); }} className="flex-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-orange-100 dark:hover:border-slate-700 rounded-[1.5rem] py-5 flex flex-col items-center justify-center text-center gap-2 active:scale-95 transition-all cursor-pointer shadow-sm">
+            <div key={s.id} onClick={() => { hapticLight(); setSelectedService(s); setShowMap(true); }} className="flex-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-orange-100 dark:hover:border-slate-700 rounded-[1.5rem] py-5 flex flex-col items-center justify-center text-center gap-2 active:scale-95 transition-all cursor-pointer shadow-sm">
               <div className={`${s.color} p-3 rounded-[1rem] shadow-sm mb-1`}>{s.icon}</div>
               <div>
                 <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 leading-none mb-1">{s.title}</h4>
