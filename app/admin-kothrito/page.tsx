@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth, googleProvider } from '@/lib/firebase';
 import { onAuthStateChanged, signInWithPopup } from 'firebase/auth';
-import { collection, query, where, onSnapshot, doc, updateDoc, orderBy, limit, Timestamp, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, orderBy, limit, Timestamp, deleteDoc, setDoc, serverTimestamp, addDoc } from 'firebase/firestore';
 import { Phone, Check, X, Bike, Power, TrendingUp, Users, Clock, Loader2, ShieldCheck, UserMinus, Edit3, Save, UserPlus, Trash2, Sun, Moon, Download, ChevronRight, Activity, IndianRupee, MapPin, ReceiptText, ChevronLeft, Map, Utensils, ShoppingBasket, Star, MessageSquare } from 'lucide-react';
 import Image from 'next/image';
 import Branding from '@/components/Branding';
@@ -13,6 +13,7 @@ import { successChimeSound, errorBeepSound } from '@/lib/sounds';
 interface Order { id: string; status: string; userName: string; userPhone: string; serviceType: string; price?: number; pickup: any; drop: any; createdAt: any; userId?: string; }
 interface Rider { id: string; name: string; phone: string; email: string; riderStatus: boolean; role: string; }
 interface UserData { id: string; name: string; phone: string; email: string; createdAt: any; }
+interface PlaceData { id: string; name: string; lat: number; lng: number; }
 
 export default function AdminDashboard() {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -28,6 +29,7 @@ export default function AdminDashboard() {
   const [history, setHistory] = useState<Order[]>([]);
   const [riders, setRiders] = useState<Rider[]>([]);
   const [activeUsers, setActiveUsers] = useState<UserData[]>([]);
+  const [places, setPlaces] = useState<PlaceData[]>([]);
   const [stats, setStats] = useState({ revenueToday: 0, totalToday: 0, pending: 0, historyAll: [] as Order[] });
 
   const [sysSettings, setSysSettings] = useState({ isServiceActive: true, baseFare: 50, perKmRate: 15, surgeMultiplier: 1.0 });
@@ -37,10 +39,12 @@ export default function AdminDashboard() {
   const [showAddRider, setShowAddRider] = useState(false);
   const [newRider, setNewRider] = useState({ name: "", email: "", phone: "" });
 
-  const [activeModal, setActiveModal] = useState<"revenue" | "rides" | "fleet" | "pricing" | "users" | "feedback" | null>(null);
+  const [activeModal, setActiveModal] = useState<"revenue" | "rides" | "fleet" | "pricing" | "users" | "feedback" | "locations" | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
   const [selectedRider, setSelectedRider] = useState<Rider | null>(null);
   const [ridesPage, setRidesPage] = useState(1);
+
+  const [newPlace, setNewPlace] = useState({ name: "", lat: "", lng: "" });
 
   const getServiceBadge = (type: string) => {
     if (type === 'food') return <span className="flex items-center gap-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400 px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-widest w-fit"><Utensils size={12} /> Food</span>;
@@ -109,6 +113,7 @@ export default function AdminDashboard() {
 
     onSnapshot(collection(db, "riders"), (snap: any) => setRiders(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Rider))));
     onSnapshot(collection(db, "users"), (snap: any) => setActiveUsers(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as UserData))));
+    onSnapshot(collection(db, "places"), (snap: any) => setPlaces(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as PlaceData))));
 
     onSnapshot(doc(db, "settings", "global"), (d: any) => {
       if (d.exists()) {
@@ -139,8 +144,19 @@ export default function AdminDashboard() {
       riderStatus: false,
       createdAt: serverTimestamp()
     });
-    setShowAddRider(false);
     setNewRider({ name: "", email: "", phone: "" });
+    setShowAddRider(false);
+  };
+
+  const handleAddPlace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPlace.name || !newPlace.lat || !newPlace.lng) return;
+    await addDoc(collection(db, "places"), {
+      name: newPlace.name,
+      lat: parseFloat(newPlace.lat),
+      lng: parseFloat(newPlace.lng)
+    });
+    setNewPlace({ name: "", lat: "", lng: "" });
   };
 
   const downloadCSV = () => {
@@ -245,6 +261,14 @@ export default function AdminDashboard() {
               <p className="text-xl font-black dark:text-white leading-none">{activeUsers.length}</p>
             </div>
           </div>
+          {/* Locations */}
+          <div onClick={() => setActiveModal('locations')} className="bg-white dark:bg-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800 p-4 rounded-[1.5rem] md:rounded-2xl shadow-sm border border-transparent md:border-slate-100 md:dark:border-slate-800 cursor-pointer active:scale-95 transition-all flex flex-col items-start gap-3">
+            <div className="bg-yellow-50 dark:bg-yellow-500/10 p-2.5 rounded-xl text-yellow-500"><MapPin size={16} /></div>
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Locations</p>
+              <p className="text-xl font-black dark:text-white leading-none">{places.length}</p>
+            </div>
+          </div>
           {/* System */}
           <div onClick={() => updateDoc(doc(db, "settings", "global"), { isServiceActive: !sysSettings.isServiceActive })} className={`p-4 rounded-[1.5rem] md:rounded-2xl shadow-sm cursor-pointer active:scale-95 transition-all flex flex-col items-start gap-3 ${sysSettings.isServiceActive ? 'bg-green-500 text-white shadow-green-500/30' : 'bg-red-500 text-white shadow-red-500/30'}`}>
             <div className="bg-white/20 p-2.5 rounded-xl text-white"><Power size={16} /></div>
@@ -325,6 +349,7 @@ export default function AdminDashboard() {
                   {activeModal === 'pricing' && 'Pricing Settings'}
                   {activeModal === 'users' && 'User Directory'}
                   {activeModal === 'feedback' && 'Feedback & Reviews'}
+                  {activeModal === 'locations' && 'Manage Locations'}
                 </h2>
                 <button onClick={() => setActiveModal(null)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full dark:text-white"><X size={20} /></button>
               </div>
@@ -669,6 +694,38 @@ export default function AdminDashboard() {
                         </div>
                       ));
                     })()}
+                  </div>
+                )}
+
+                {activeModal === 'locations' && (
+                  <div className="space-y-6">
+                    <form onSubmit={handleAddPlace} className="bg-slate-50 dark:bg-slate-900 border dark:border-slate-800 p-6 rounded-[2rem] shadow-sm">
+                      <h3 className="font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-xs mb-4">Add Popular Place</h3>
+                      <div className="space-y-4">
+                        <input value={newPlace.name} onChange={e => setNewPlace({ ...newPlace, name: e.target.value })} placeholder="Location Name (e.g. Main Gate)" className="w-full bg-white dark:bg-slate-950 p-4 rounded-xl border dark:border-slate-700 dark:text-white focus:border-orange-500 outline-none font-bold" />
+                        <div className="flex gap-4">
+                          <input value={newPlace.lat} onChange={e => setNewPlace({ ...newPlace, lat: e.target.value })} placeholder="Latitude (e.g. 23.081)" className="w-full bg-white dark:bg-slate-950 p-4 rounded-xl border dark:border-slate-700 dark:text-white focus:border-orange-500 outline-none font-bold" />
+                          <input value={newPlace.lng} onChange={e => setNewPlace({ ...newPlace, lng: e.target.value })} placeholder="Longitude (e.g. 76.842)" className="w-full bg-white dark:bg-slate-950 p-4 rounded-xl border dark:border-slate-700 dark:text-white focus:border-orange-500 outline-none font-bold" />
+                        </div>
+                        <button type="submit" className="w-full bg-orange-500 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 transition-transform flex justify-center items-center gap-2">
+                          <MapPin size={18} /> Save Coordinate
+                        </button>
+                      </div>
+                    </form>
+
+                    <div className="space-y-4">
+                      {places.map(p => (
+                        <div key={p.id} className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-5 rounded-2xl flex justify-between items-center shadow-sm">
+                          <div>
+                            <h4 className="font-black text-lg dark:text-white">{p.name}</h4>
+                            <p className="text-xs font-mono text-slate-500 mt-1">{p.lat}, {p.lng}</p>
+                          </div>
+                          <button onClick={() => deleteDoc(doc(db, "places", p.id))} className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-colors">
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
