@@ -308,7 +308,13 @@ export default function Home() {
         {/* MODALS & OVERLAYS */}
         {showOnboarding && (
           <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-end justify-center">
-            <div className="bg-white w-full max-w-md rounded-t-[3rem] p-8 pb-12 animate-in slide-in-from-bottom duration-500">
+            <div className="bg-white w-full max-w-md rounded-t-[3rem] p-8 pb-12 animate-in slide-in-from-bottom duration-500 relative">
+              <button
+                onClick={() => { setShowOnboarding(false); setPendingOrder(null); }}
+                className="absolute top-8 right-8 p-2 bg-slate-100 rounded-full text-slate-500 hover:text-slate-800 active:scale-95 transition-all"
+              >
+                <X size={18} />
+              </button>
               <h2 className="text-2xl font-black text-slate-800 mb-2">Welcome!</h2>
               <p className="text-slate-500 text-sm mb-8 font-medium">Please provide your details to continue.</p>
               <div className="space-y-6">
