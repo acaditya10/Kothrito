@@ -300,7 +300,6 @@ export default function Home() {
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</span>
                 <span className="text-sm font-black text-slate-800 dark:text-slate-200">Ready to Order</span>
               </div>
-              <div className="bg-white dark:bg-slate-800 shadow-sm p-3 rounded-2xl"><ChevronRight size={18} className="text-slate-400" /></div>
             </div>
           )}
         </section>
