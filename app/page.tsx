@@ -9,8 +9,8 @@ import { successChimeSound, errorBeepSound } from '@/lib/sounds';
 import Branding from '@/components/Branding';
 
 // Firebase Imports
-import { auth, db } from '@/lib/firebase';
-import { signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { auth, db, googleProvider } from '@/lib/firebase';
+import { signInWithPopup, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, addDoc, serverTimestamp, onSnapshot, query, where, updateDoc } from 'firebase/firestore';
 
 // Dynamically import Map (Leaflet is client-side only)
@@ -18,7 +18,6 @@ const MapPicker = dynamic(() => import('@/components/MapPicker'), {
   ssr: false,
   loading: () => <div className="fixed inset-0 bg-white z-[200] flex items-center justify-center font-bold">Loading Satellite Map...</div>
 });
-import LocationSelect from '@/components/LocationSelect';
 
 export default function Home() {
   // --- STATES ---
@@ -29,12 +28,7 @@ export default function Home() {
   const [baseFare, setBaseFare] = useState(20);
   const [sysSettings, setSysSettings] = useState<any>({});
 
-  const [showLocationSelect, setShowLocationSelect] = useState(false);
   const [showMap, setShowMap] = useState(false);
-  const [fallbackMapMode, setFallbackMapMode] = useState<'pickup' | 'drop'>('pickup');
-  const [initialPickup, setInitialPickup] = useState<any>(null);
-  const [initialDrop, setInitialDrop] = useState<any>(null);
-
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showServicePicker, setShowServicePicker] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
@@ -47,11 +41,6 @@ export default function Home() {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [pendingOrder, setPendingOrder] = useState<any>(null);
-
-  const [showSaveLocation, setShowSaveLocation] = useState(false);
-  const [locationToSave, setLocationToSave] = useState<any>(null);
-  const [saveLocationName, setSaveLocationName] = useState("");
 
   const { hapticLight, hapticMedium, hapticSuccess, hapticError } = useHaptics();
   const [playSuccess] = useSound(successChimeSound, { volume: 0.5 });
@@ -71,10 +60,10 @@ export default function Home() {
           setProfile(userDoc.data());
           setShowOnboarding(false);
         } else {
-          setName("");
+          setName(u.displayName || "");
+          setShowOnboarding(true);
         }
       } else {
-        signInAnonymously(auth).catch((e) => console.error("Anon Login Failed", e));
         setUser(null);
         setProfile(null);
       }
@@ -116,9 +105,11 @@ export default function Home() {
   }, [user]);
 
   // --- HANDLERS ---
-  const handleAuthAction = () => {
-    if (!profile) {
-      setShowOnboarding(true);
+  const handleAuthAction = async () => {
+    if (!user) {
+      try {
+        await signInWithPopup(auth, googleProvider);
+      } catch (error) { console.error(error); }
     } else {
       setShowLogout(!showLogout);
     }
@@ -138,42 +129,8 @@ export default function Home() {
     window.location.reload();
   };
 
-  const submitFinalOrder = async (pickup: any, drop: any, pAddr: string, dAddr: string, exactPrice: number, pName: string, pPhone: string) => {
-    if (!user || !selectedService) return;
-    hapticMedium();
-    try {
-      await addDoc(collection(db, "orders"), {
-        userId: user.uid,
-        userName: pName,
-        userPhone: pPhone,
-        status: "pending",
-        serviceType: selectedService.id,
-        price: exactPrice,
-        pickup: { lat: pickup.lat, lng: pickup.lng, address: pAddr },
-        drop: { lat: drop.lat, lng: drop.lng, address: dAddr },
-        createdAt: serverTimestamp(),
-      });
-      setShowMap(false);
-      setSelectedService(null);
-      setPendingOrder(null);
-      hapticSuccess();
-      playSuccess();
-
-      // Check if we should prompt them to save this custom point
-      // (Only prompt for the drop location to avoid spamming them, assuming pickup is usually "Here")
-      if (dAddr === "Pinned Location" || dAddr.includes("Unknown")) {
-        setLocationToSave({ lat: drop.lat, lng: drop.lng, type: 'drop' });
-        setShowSaveLocation(true);
-      }
-
-    } catch (e) {
-      hapticError();
-      playError();
-      alert("Error placing order");
-    }
-  };
-
   const saveProfile = async () => {
+    // Basic validation: strip all non-digits
     const digits = phone.replace(/\D/g, '');
     let finalPhone = phone;
     if (digits.length === 10) {
@@ -186,30 +143,11 @@ export default function Home() {
 
     if (!user || finalPhone.length < 13) return alert("Enter a valid phone number");
     setIsSaving(true);
-    const data = { name, phone: finalPhone, uid: user.uid, updatedAt: new Date() };
+    const data = { name, phone: finalPhone, email: user.email, uid: user.uid, updatedAt: new Date() };
     await setDoc(doc(db, "users", user.uid), data);
     setProfile(data);
     setShowOnboarding(false);
     setIsSaving(false);
-
-    if (pendingOrder) {
-      await submitFinalOrder(pendingOrder.pickup, pendingOrder.drop, pendingOrder.pAddr, pendingOrder.dAddr, pendingOrder.exactPrice, data.name, data.phone);
-    }
-  };
-
-  const handleSaveCustomLocation = async () => {
-    if (!user || !locationToSave || !saveLocationName.trim()) return;
-    try {
-      await addDoc(collection(db, `users/${user.uid}/savedLocations`), {
-        name: saveLocationName.trim(),
-        lat: locationToSave.lat,
-        lng: locationToSave.lng,
-        createdAt: serverTimestamp()
-      });
-      setShowSaveLocation(false);
-      setSaveLocationName("");
-      setLocationToSave(null);
-    } catch (e) { console.error(e); }
   };
 
   const submitRating = async () => {
@@ -226,15 +164,31 @@ export default function Home() {
   };
 
   const handleOrderSubmission = async (pickup: any, drop: any, pAddr: string, dAddr: string, exactPrice: number) => {
-    if (!user || !selectedService) return;
+    if (!user || !profile || !selectedService) return;
 
-    if (!profile) {
-      setPendingOrder({ pickup, drop, pAddr, dAddr, exactPrice });
-      setShowOnboarding(true);
-      return;
+    hapticMedium();
+
+    try {
+      await addDoc(collection(db, "orders"), {
+        userId: user.uid,
+        userName: profile.name,
+        userPhone: profile.phone,
+        status: "pending",
+        serviceType: selectedService.id,
+        price: exactPrice,
+        pickup: { lat: pickup.lat, lng: pickup.lng, address: pAddr },
+        drop: { lat: drop.lat, lng: drop.lng, address: dAddr },
+        createdAt: serverTimestamp(),
+      });
+      setShowMap(false);
+      setSelectedService(null);
+      hapticSuccess();
+      playSuccess();
+    } catch (e) {
+      hapticError();
+      playError();
+      alert("Error placing order");
     }
-
-    await submitFinalOrder(pickup, drop, pAddr, dAddr, exactPrice, profile.name, profile.phone);
   };
 
   // --- CONDITIONAL RENDERING ---
@@ -272,10 +226,10 @@ export default function Home() {
               <button onClick={handleLogout} className="bg-red-500 text-white px-4 py-1.5 rounded-full text-[10px] font-black animate-in fade-in zoom-in duration-200 shadow-lg cursor-pointer z-50">LOGOUT?</button>
             )}
             <button onClick={handleAuthAction} className={`flex items-center gap-2 px-3 py-1.5 rounded-full active:scale-95 transition-all border ${showLogout ? 'bg-slate-900 border-slate-900 text-white' : 'bg-slate-50 border-slate-100 text-slate-700'}`}>
-              {profile ? (
-                <><div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${showLogout ? 'bg-white text-black' : 'bg-orange-500 text-white'}`}>{profile.name?.[0]?.toUpperCase()}</div><span className="text-xs font-bold">{profile.name?.split(' ')[0]}</span></>
+              {user ? (
+                <><div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${showLogout ? 'bg-white text-black' : 'bg-orange-500 text-white'}`}>{user.displayName?.[0]}</div><span className="text-xs font-bold">{user.displayName?.split(' ')[0]}</span></>
               ) : (
-                <><User size={14} /><span className="text-xs font-bold">Profile</span></>
+                <><LogIn size={14} /><span className="text-xs font-bold">Login</span></>
               )}
             </button>
           </div>
@@ -292,7 +246,7 @@ export default function Home() {
 
         <div className="px-6 mt-6 shrink-0 z-20 flex justify-between gap-3">
           {services.map((s) => (
-            <div key={s.id} onClick={() => { hapticLight(); setSelectedService(s); setShowLocationSelect(true); }} className="flex-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-orange-100 dark:hover:border-slate-700 rounded-[1.5rem] py-5 flex flex-col items-center justify-center text-center gap-2 active:scale-95 transition-all cursor-pointer shadow-sm">
+            <div key={s.id} onClick={() => { hapticLight(); if (user) { setSelectedService(s); setShowMap(true); } else handleAuthAction(); }} className="flex-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-orange-100 dark:hover:border-slate-700 rounded-[1.5rem] py-5 flex flex-col items-center justify-center text-center gap-2 active:scale-95 transition-all cursor-pointer shadow-sm">
               <div className={`${s.color} p-3 rounded-[1rem] shadow-sm mb-1`}>{s.icon}</div>
               <div>
                 <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 leading-none mb-1">{s.title}</h4>
@@ -369,7 +323,7 @@ export default function Home() {
               </div>
               <div className="space-y-3">
                 {services.map((s) => (
-                  <div key={s.id} onClick={() => { setSelectedService(s); setShowServicePicker(false); setShowLocationSelect(true); }} className="bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-2xl p-4 flex items-center gap-4 active:scale-95 transition-transform cursor-pointer">
+                  <div key={s.id} onClick={() => { setSelectedService(s); setShowServicePicker(false); setShowMap(true); }} className="bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-2xl p-4 flex items-center gap-4 active:scale-95 transition-transform cursor-pointer">
                     <div className={`${s.color} p-4 rounded-2xl shadow-sm`}>{s.icon}</div>
                     <div className="flex-1">
                       <h4 className="font-black text-lg text-slate-800 dark:text-white">{s.title}</h4>
@@ -382,72 +336,14 @@ export default function Home() {
           </div>
         )}
 
-        {showLocationSelect && (
-          <LocationSelect
-            userId={user?.uid || ""}
-            onClose={() => setShowLocationSelect(false)}
-            initialPickup={initialPickup}
-            initialDrop={initialDrop}
-            onOpenMap={(isPickup) => {
-              setFallbackMapMode(isPickup ? 'pickup' : 'drop');
-              setShowLocationSelect(false);
-              setShowMap(true);
-            }}
-            onConfirm={(p, d) => {
-              setInitialPickup(p);
-              setInitialDrop(d);
-              setShowLocationSelect(false);
-              setShowMap(true);
-            }}
-          />
-        )}
-
         {showMap && (
           <MapPicker
-            onClose={() => {
-              // If they back out of the map, send them back to LocationSelect unless they fully canceled
-              setShowMap(false);
-              if (!initialPickup || !initialDrop) setShowLocationSelect(true);
-            }}
+            onClose={() => setShowMap(false)}
             onConfirm={handleOrderSubmission}
             baseFare={selectedService?.id === 'food' ? baseFare + 10 : selectedService?.id === 'grocery' ? baseFare + 5 : baseFare}
             perKmRate={sysSettings.perKmRate || 10}
             surgeMultiplier={sysSettings.surgeMultiplier || 1.0}
-            fallbackMode={fallbackMapMode}
-            initialPickup={initialPickup}
-            initialDrop={initialDrop}
           />
-        )}
-
-        {showSaveLocation && (
-          <div className="fixed inset-0 z-[250] bg-black/60 backdrop-blur-sm flex items-end justify-center">
-            <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[3rem] p-8 pb-12 animate-in slide-in-from-bottom duration-300">
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <h2 className="text-2xl font-black text-slate-800 dark:text-white">Save this spot?</h2>
-                  <p className="text-sm font-bold text-slate-400 mt-1">Make booking faster next time.</p>
-                </div>
-                <button onClick={() => setShowSaveLocation(false)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full dark:text-white"><X size={20} /></button>
-              </div>
-
-              <div className="space-y-4">
-                <input
-                  value={saveLocationName}
-                  onChange={(e) => setSaveLocationName(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-2xl p-4 font-bold outline-none text-slate-800 dark:text-white focus:border-orange-500"
-                  placeholder="e.g. My Hostel, Library..."
-                  autoFocus
-                />
-                <button
-                  onClick={handleSaveCustomLocation}
-                  disabled={!saveLocationName.trim()}
-                  className="w-full bg-orange-600 disabled:bg-orange-600/50 text-white py-4 rounded-2xl font-black shadow-xl active:scale-95 transition-all text-center"
-                >
-                  Save Location
-                </button>
-              </div>
-            </div>
-          </div>
         )}
 
         {activeOrder?.status === 'completed' && !activeOrder?.rated && (

@@ -1,0 +1,2 @@
+.next/types/validator.ts(42,39): error TS2307: Cannot find module '../../app/admin-kothrito/page.js' or its corresponding type declarations.
+.next/types/validator.ts(51,39): error TS2307: Cannot find module '../../app/kothrito-rider/page.js' or its corresponding type declarations.

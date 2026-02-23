@@ -11,19 +11,15 @@ interface MapPickerProps {
   baseFare: number;
   perKmRate: number;
   surgeMultiplier: number;
-  fallbackMode?: 'pickup' | 'drop';
-  initialPickup?: L.LatLng | null;
-  initialDrop?: L.LatLng | null;
 }
 
-export default function MapPicker({ onConfirm, onClose, baseFare, perKmRate, surgeMultiplier, fallbackMode, initialPickup, initialDrop }: MapPickerProps) {
+export default function MapPicker({ onConfirm, onClose, baseFare, perKmRate, surgeMultiplier }: MapPickerProps) {
   const mapRef = useRef<L.Map | null>(null);
-  const [step, setStep] = useState(fallbackMode === 'drop' ? 2 : 1); // 1: Pickup, 2: Drop, 3: Address Details
-  const [pickup, setPickup] = useState<L.LatLng | null>(initialPickup || null);
-  const [drop, setDrop] = useState<L.LatLng | null>(initialDrop || null);
+  const [step, setStep] = useState(1); // 1: Pickup, 2: Drop, 3: Address Details
+  const [pickup, setPickup] = useState<L.LatLng | null>(null);
+  const [drop, setDrop] = useState<L.LatLng | null>(null);
   const [pAddr, setPAddr] = useState("");
   const [dAddr, setDAddr] = useState("");
-  const [isLocating, setIsLocating] = useState(false);
 
   // Dynamic Pricing States
   const [distanceKm, setDistanceKm] = useState<number>(0);
@@ -46,8 +42,8 @@ export default function MapPicker({ onConfirm, onClose, baseFare, perKmRate, sur
         maxZoom: 20,
       }).addTo(mapRef.current);
 
-      // Lock bounds to 3km around campus explicitly
-      const bounds = L.latLng(23.081306, 76.842861).toBounds(3000);
+      // Lock bounds to 10km around campus
+      const bounds = L.latLng(23.081306, 76.842861).toBounds(10000);
       mapRef.current.setMaxBounds(bounds);
     }
 
@@ -96,28 +92,11 @@ export default function MapPicker({ onConfirm, onClose, baseFare, perKmRate, sur
     }
   };
 
-  const handleLocateMe = () => {
-    if (!mapRef.current) return;
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        mapRef.current?.flyTo([latitude, longitude], 18, { animate: true, duration: 1 });
-        setIsLocating(false);
-      },
-      () => {
-        alert("Please enable GPS permissions to use this feature.");
-        setIsLocating(false);
-      },
-      { enableHighAccuracy: true }
-    );
-  };
-
   return (
     <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in fade-in duration-300">
       {/* HEADER */}
       <div className="absolute top-0 inset-x-0 p-6 z-[1000] flex items-center justify-between pointer-events-none">
-        <button onClick={onClose} className="p-3 bg-white rounded-full shadow-xl pointer-events-auto active:scale-90 transition-transform text-slate-800">
+        <button onClick={onClose} className="p-3 bg-white rounded-full shadow-xl pointer-events-auto active:scale-90 transition-transform">
           <X size={20} />
         </button>
         <div className="bg-white px-4 py-2 rounded-full shadow-xl pointer-events-auto border border-orange-100 font-bold text-xs text-orange-600 uppercase tracking-widest">
@@ -130,14 +109,6 @@ export default function MapPicker({ onConfirm, onClose, baseFare, perKmRate, sur
       {step < 3 && (
         <div className="relative flex-1">
           <div id="map-container" className="w-full h-full" />
-
-          {/* GPS Locate Me Button */}
-          <button
-            onClick={handleLocateMe}
-            className="absolute bottom-40 right-4 z-[1000] p-4 bg-white text-blue-600 rounded-full shadow-2xl active:scale-90 transition-transform"
-          >
-            {isLocating ? <Loader2 className="animate-spin" size={24} /> : <MapPin className="fill-blue-100" size={24} />}
-          </button>
 
           {/* CENTER CROSSHAIR */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[1000]">
