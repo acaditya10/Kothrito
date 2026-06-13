@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect } from 'react';
-import { LogIn, User, Bike, Utensils, ShoppingBasket, ChevronRight, Loader2, Phone, X, Sun, Moon, Star, Check } from 'lucide-react';
+import { LogIn, User, Bike, Utensils, ShoppingBasket, ChevronRight, Loader2, Phone, X, Sun, Moon, Star, Check, Store } from 'lucide-react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useHaptics } from '@/hooks/useHaptics';
@@ -18,6 +18,8 @@ const MapPicker = dynamic(() => import('@/components/MapPicker'), {
   ssr: false,
   loading: () => <div className="fixed inset-0 bg-white z-[200] flex items-center justify-center font-bold">Loading Satellite Map...</div>
 });
+
+interface AppRestaurant { id: string; name: string; isOnline: boolean; menuImages: string[]; }
 
 export default function Home() {
   // --- STATES ---
@@ -42,6 +44,12 @@ export default function Home() {
   const [name, setName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [pendingOrder, setPendingOrder] = useState<any>(null);
+
+  // Restaurant States
+  const [restaurants, setRestaurants] = useState<AppRestaurant[]>([]);
+  const [showRestaurantList, setShowRestaurantList] = useState(false);
+  const [selectedRestaurant, setSelectedRestaurant] = useState<AppRestaurant | null>(null);
+  const [customOrderText, setCustomOrderText] = useState("");
 
   const { hapticLight, hapticMedium, hapticSuccess, hapticError } = useHaptics();
   const [playSuccess] = useSound(successChimeSound, { volume: 0.5 });
@@ -78,7 +86,14 @@ export default function Home() {
       }
     });
 
-    return () => { unsubAuth(); unsubSettings(); };
+    const unsubRestaurants = onSnapshot(
+      query(collection(db, "restaurants"), where("isOnline", "==", true)),
+      (snap) => {
+        setRestaurants(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppRestaurant)));
+      }
+    );
+
+    return () => { unsubAuth(); unsubSettings(); unsubRestaurants(); };
   }, []);
 
   // --- 2. ACTIVE ORDER LISTENER (Student's Current Ride) ---
@@ -182,12 +197,17 @@ export default function Home() {
         status: "pending",
         serviceType: selectedService.id,
         price: exactPrice,
-        pickup: { lat: pickup.lat, lng: pickup.lng, address: pAddr },
+        pickup: { lat: pickup?.lat || 0, lng: pickup?.lng || 0, address: selectedRestaurant ? selectedRestaurant.name : pAddr },
         drop: { lat: drop.lat, lng: drop.lng, address: dAddr },
+        restaurantId: selectedRestaurant?.id || null,
+        restaurantName: selectedRestaurant?.name || null,
+        customOrderText: customOrderText || null,
         createdAt: serverTimestamp(),
       });
       setShowMap(false);
       setSelectedService(null);
+      setSelectedRestaurant(null);
+      setCustomOrderText("");
       hapticSuccess();
       playSuccess();
     } catch (e) {
@@ -252,7 +272,15 @@ export default function Home() {
 
         <div className="px-6 mt-6 shrink-0 z-20 flex justify-between gap-3">
           {services.map((s) => (
-            <div key={s.id} onClick={() => { hapticLight(); setSelectedService(s); setShowMap(true); }} className="flex-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-orange-100 dark:hover:border-slate-700 rounded-[1.5rem] py-5 flex flex-col items-center justify-center text-center gap-2 active:scale-95 transition-all cursor-pointer shadow-sm">
+            <div key={s.id} onClick={() => {
+              hapticLight();
+              setSelectedService(s);
+              if (s.id === 'food') {
+                setShowRestaurantList(true);
+              } else {
+                setShowMap(true);
+              }
+            }} className="flex-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-orange-100 dark:hover:border-slate-700 rounded-[1.5rem] py-5 flex flex-col items-center justify-center text-center gap-2 active:scale-95 transition-all cursor-pointer shadow-sm">
               <div className={`${s.color} p-3 rounded-[1rem] shadow-sm mb-1`}>{s.icon}</div>
               <div>
                 <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 leading-none mb-1">{s.title}</h4>
@@ -347,9 +375,110 @@ export default function Home() {
           </div>
         )}
 
+        {showRestaurantList && (
+          <div className="fixed inset-0 z-[150] bg-slate-50 dark:bg-slate-950 flex flex-col animate-in slide-in-from-bottom duration-300">
+            <div className="p-6 border-b dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900 shadow-sm z-10 sticky top-0">
+              <div>
+                <h2 className="text-2xl font-black text-slate-800 dark:text-white leading-none mb-1">Restaurants</h2>
+                <p className="text-xs font-bold text-slate-400">Order from campus vendors</p>
+              </div>
+              <button onClick={() => { setShowRestaurantList(false); setSelectedService(null); }} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full dark:text-white">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 p-6 overflow-y-auto space-y-4 pb-24">
+              {restaurants.length === 0 ? (
+                <div className="text-center p-10 border border-dashed border-slate-200 dark:border-slate-800 rounded-[2rem]">
+                  <Store size={32} className="mx-auto text-slate-300 dark:text-slate-700 mb-3" />
+                  <h3 className="font-black text-slate-400 uppercase tracking-widest text-xs">No Restaurants Open</h3>
+                </div>
+              ) : (
+                restaurants.map(r => (
+                  <div key={r.id} onClick={() => { setSelectedRestaurant(r); setShowRestaurantList(false); }} className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 flex items-center gap-4 cursor-pointer active:scale-95 transition-all shadow-sm">
+                    <div className="w-14 h-14 bg-orange-50 dark:bg-orange-500/10 rounded-2xl flex items-center justify-center text-orange-500 shrink-0">
+                      <Store size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black dark:text-white leading-none mb-1">{r.name}</h3>
+                      <p className="text-[10px] font-black text-green-500 uppercase tracking-widest bg-green-50 dark:bg-green-500/10 px-2 py-0.5 rounded text-left inline-block">Accepting Orders</p>
+                    </div>
+                    <ChevronRight className="ml-auto text-slate-300 dark:text-slate-600" />
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {selectedRestaurant && !showMap && (
+          <div className="fixed inset-0 z-[160] bg-slate-50 dark:bg-slate-950 flex flex-col animate-in slide-in-from-right duration-300">
+            <div className="p-6 border-b dark:border-slate-800 flex items-center gap-4 bg-white dark:bg-slate-900 shadow-sm z-10 sticky top-0">
+              <button onClick={() => { setSelectedRestaurant(null); setShowRestaurantList(true); }} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full dark:text-white">
+                <ChevronRight size={20} className="rotate-180" />
+              </button>
+              <div>
+                <h2 className="text-xl font-black text-slate-800 dark:text-white leading-none mb-1">{selectedRestaurant.name}</h2>
+                <span className="text-[10px] font-black text-green-500 uppercase tracking-widest">Online</span>
+              </div>
+            </div>
+
+            <div className="flex-1 p-6 overflow-y-auto pb-32">
+              {/* Menu Images Scroller */}
+              {selectedRestaurant.menuImages && selectedRestaurant.menuImages.length > 0 && (
+                <div className="mb-8">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Utensils size={14} /> Menu Cards</h3>
+                  <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2 snap-x">
+                    {selectedRestaurant.menuImages.map((img, i) => (
+                      <div key={i} className="shrink-0 w-48 h-64 relative rounded-2xl overflow-hidden shadow-sm snap-center border dark:border-slate-800">
+                        {/* Using an anchor with target=_blank acts as a simple lightbox */}
+                        <a href={img} target="_blank" rel="noreferrer">
+                          <Image src={img} alt="Menu" fill className="object-cover" />
+                          <div className="absolute inset-0 bg-black/20 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <span className="bg-white text-black text-[10px] font-black uppercase px-3 py-2 rounded-full shadow-lg">View Full</span>
+                          </div>
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Order Input Area */}
+              <div>
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"><ShoppingBasket size={14} /> Your Order</h3>
+                <textarea
+                  value={customOrderText}
+                  onChange={e => setCustomOrderText(e.target.value)}
+                  placeholder="Ex: 2x Masala Dosa, 1x Cold Coffee (less sugar)..."
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-[2rem] h-40 text-sm font-bold resize-none outline-none focus:ring-2 ring-orange-100 dark:ring-orange-900 transition-all dark:text-white shadow-sm"
+                ></textarea>
+              </div>
+            </div>
+
+            <div className="p-6 bg-white dark:bg-slate-900 border-t dark:border-slate-800 sticky bottom-0 z-20">
+              <button
+                disabled={!customOrderText.trim()}
+                onClick={() => setShowMap(true)}
+                className="w-full bg-orange-600 disabled:bg-slate-200 disabled:text-slate-400 text-white py-5 rounded-[2rem] text-lg font-black shadow-xl active:scale-95 transition-all"
+              >
+                Choose Delivery Drop
+              </button>
+            </div>
+          </div>
+        )}
+
         {showMap && (
           <MapPicker
-            onClose={() => setShowMap(false)}
+            isDeliveryOnly={selectedService?.id === 'food'}
+            onClose={() => {
+              if (selectedService?.id === 'food') {
+                setShowMap(false);
+                // Stay on Restaurant detail
+              } else {
+                setShowMap(false);
+              }
+            }}
             onConfirm={handleOrderSubmission}
             baseFare={selectedService?.id === 'food' ? baseFare + 10 : selectedService?.id === 'grocery' ? baseFare + 5 : baseFare}
             perKmRate={sysSettings.perKmRate || 10}

@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth, googleProvider } from '@/lib/firebase';
 import { onAuthStateChanged, signInWithPopup } from 'firebase/auth';
 import { collection, query, where, onSnapshot, doc, updateDoc, orderBy, limit, Timestamp, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { Phone, Check, X, Bike, Power, TrendingUp, Users, Clock, Loader2, ShieldCheck, UserMinus, Edit3, Save, UserPlus, Trash2, Sun, Moon, Download, ChevronRight, Activity, IndianRupee, MapPin, ReceiptText, ChevronLeft, Map, Utensils, ShoppingBasket, Star, MessageSquare } from 'lucide-react';
+import { Phone, Check, X, Bike, Power, TrendingUp, Users, Clock, Loader2, ShieldCheck, UserMinus, Edit3, Save, UserPlus, Trash2, Sun, Moon, Download, ChevronRight, Activity, IndianRupee, MapPin, ReceiptText, ChevronLeft, Map, Utensils, ShoppingBasket, Star, MessageSquare, Store, UploadCloud } from 'lucide-react';
 import Image from 'next/image';
 import Branding from '@/components/Branding';
 import { useHaptics } from '@/hooks/useHaptics';
@@ -13,6 +13,7 @@ import { successChimeSound, errorBeepSound } from '@/lib/sounds';
 interface Order { id: string; status: string; userName: string; userPhone: string; serviceType: string; price?: number; pickup: any; drop: any; createdAt: any; userId?: string; }
 interface Rider { id: string; name: string; phone: string; email: string; riderStatus: boolean; role: string; }
 interface UserData { id: string; name: string; phone: string; email: string; createdAt: any; }
+interface AdminRestaurant { id: string; name: string; isOnline: boolean; menuImages: string[]; }
 
 export default function AdminDashboard() {
     const [isAdmin, setIsAdmin] = useState(false);
@@ -28,16 +29,23 @@ export default function AdminDashboard() {
     const [history, setHistory] = useState<Order[]>([]);
     const [riders, setRiders] = useState<Rider[]>([]);
     const [activeUsers, setActiveUsers] = useState<UserData[]>([]);
+    const [restaurants, setRestaurants] = useState<AdminRestaurant[]>([]);
     const [stats, setStats] = useState({ revenueToday: 0, totalToday: 0, pending: 0, historyAll: [] as Order[] });
 
-    const [sysSettings, setSysSettings] = useState({ isServiceActive: true, baseFare: 50, perKmRate: 15, surgeMultiplier: 1.0 });
+    const [sysSettings, setSysSettings] = useState({ isServiceActive: true, baseFare: 50, perKmRate: 15, surgeMultiplier: 1.0, quickLocations: ["Hostel 1", "Hostel 2", "Girls Hostel", "Academic Block", "Main Gate"] });
     const [editingPricing, setEditingPricing] = useState(false);
-    const [newPricing, setNewPricing] = useState({ baseFare: 50, perKmRate: 15, surgeMultiplier: 1.0 });
+    const [newPricing, setNewPricing] = useState({ baseFare: 50, perKmRate: 15, surgeMultiplier: 1.0, quickLocations: ["Hostel 1", "Hostel 2", "Girls Hostel", "Academic Block", "Main Gate"] });
+    const [quickLocInput, setQuickLocInput] = useState("");
 
     const [showAddRider, setShowAddRider] = useState(false);
     const [newRider, setNewRider] = useState({ name: "", email: "", phone: "" });
 
-    const [activeModal, setActiveModal] = useState<"revenue" | "rides" | "fleet" | "pricing" | "users" | "feedback" | null>(null);
+    const [showAddRestaurant, setShowAddRestaurant] = useState(false);
+    const [newRestaurant, setNewRestaurant] = useState({ name: "" });
+    const [menuFiles, setMenuFiles] = useState<File[]>([]);
+    const [uploadingRestaurant, setUploadingRestaurant] = useState(false);
+
+    const [activeModal, setActiveModal] = useState<"revenue" | "rides" | "fleet" | "pricing" | "users" | "feedback" | "restaurants" | null>(null);
     const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
     const [selectedRider, setSelectedRider] = useState<Rider | null>(null);
     const [ridesPage, setRidesPage] = useState(1);
@@ -48,7 +56,7 @@ export default function AdminDashboard() {
         return <span className="flex items-center gap-1.5 bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-widest w-fit"><Bike size={12} /> Ride</span>;
     };
 
-    const ADMIN_EMAIL = "acadityachandra@gmail.com";
+    const ADMIN_EMAILS = ["acadityachandra@gmail.com"];
 
     useEffect(() => {
         const isDark = localStorage.getItem('kothrito-theme') === 'dark';
@@ -57,7 +65,7 @@ export default function AdminDashboard() {
 
         const unsub = onAuthStateChanged(auth, (u) => {
             setUser(u);
-            if (u && u.email === ADMIN_EMAIL) setIsAdmin(true);
+            if (u && u.email && ADMIN_EMAILS.includes(u.email.toLowerCase())) setIsAdmin(true);
             else setIsAdmin(false);
             setLoading(false);
         });
@@ -77,8 +85,7 @@ export default function AdminDashboard() {
         // Track previous length to ring bell on new inbound orders
         let previousOrderCount = 0;
 
-        // Active orders query: Fixed index issue by removing orderBy and sorting locally
-        onSnapshot(query(collection(db, "orders"), where("status", "in", ["pending", "accepted"])), (snap: any) => {
+        const unsubOrders = onSnapshot(query(collection(db, "orders"), where("status", "in", ["pending", "accepted"])), (snap: any) => {
             const docs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Order));
             docs.sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
@@ -93,7 +100,7 @@ export default function AdminDashboard() {
         });
 
         // Complete history query for all analytics
-        onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap: any) => {
+        const unsubHistory = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap: any) => {
             const allDocs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Order));
             const t = new Date(); t.setHours(0, 0, 0, 0);
             const todayDocs = allDocs.filter((d: any) => d.createdAt && d.createdAt.seconds * 1000 >= t.getTime());
@@ -107,25 +114,39 @@ export default function AdminDashboard() {
             }));
         });
 
-        onSnapshot(collection(db, "riders"), (snap: any) => setRiders(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Rider))));
-        onSnapshot(collection(db, "users"), (snap: any) => setActiveUsers(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as UserData))));
+        const unsubRiders = onSnapshot(collection(db, "riders"), (snap: any) => setRiders(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Rider))));
+        const unsubUsers = onSnapshot(collection(db, "users"), (snap: any) => setActiveUsers(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as UserData))));
+        const unsubRestaurants = onSnapshot(collection(db, "restaurants"), (snap: any) => setRestaurants(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as AdminRestaurant))));
 
-        onSnapshot(doc(db, "settings", "global"), (d: any) => {
+        // Standard Settings
+        const unsubGlobal = onSnapshot(doc(db, "settings", "global"), (d: any) => {
             if (d.exists()) {
                 const data = d.data();
-                setSysSettings({
-                    isServiceActive: data.isServiceActive ?? true,
-                    baseFare: data.baseFare ?? 50,
-                    perKmRate: data.perKmRate ?? 15,
-                    surgeMultiplier: data.surgeMultiplier ?? 1.0
-                });
-                setNewPricing({
-                    baseFare: data.baseFare ?? 50,
-                    perKmRate: data.perKmRate ?? 15,
-                    surgeMultiplier: data.surgeMultiplier ?? 1.0
-                });
+                setSysSettings(prev => ({ ...prev, isServiceActive: data.isServiceActive ?? true, baseFare: data.baseFare ?? 50, perKmRate: data.perKmRate ?? 15, surgeMultiplier: data.surgeMultiplier ?? 1.0 }));
+                setNewPricing(prev => ({ ...prev, baseFare: data.baseFare ?? 50, perKmRate: data.perKmRate ?? 15, surgeMultiplier: data.surgeMultiplier ?? 1.0 }));
             }
         });
+
+        // App/UI Specific Settings
+        const unsubApp = onSnapshot(doc(db, "settings", "appSettings"), (d: any) => {
+            if (d.exists()) {
+                const data = d.data();
+                if (data.quickLocations) {
+                    setSysSettings(prev => ({ ...prev, quickLocations: data.quickLocations }));
+                    setNewPricing(prev => ({ ...prev, quickLocations: data.quickLocations }));
+                }
+            }
+        });
+
+        return () => {
+            unsubOrders();
+            unsubHistory();
+            unsubRiders();
+            unsubUsers();
+            unsubRestaurants();
+            unsubGlobal();
+            unsubApp();
+        };
     }, [isAdmin]);
 
     const handleAddRider = async (e: React.FormEvent) => {
@@ -185,6 +206,10 @@ export default function AdminDashboard() {
             <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-slate-50 dark:bg-slate-950">
                 <Branding role="Admin" />
                 <p className="text-red-500 font-black tracking-widest uppercase mt-8 mb-2">Access Denied</p>
+                <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl mb-6">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Logged In As:</p>
+                    <p className="text-sm font-black dark:text-white">{user.email}</p>
+                </div>
                 <p className="text-sm font-bold text-slate-500 mb-8 max-w-xs leading-relaxed">Your profile lacks Master Admin Database privileges.</p>
                 <button onClick={() => auth.signOut()} className="text-slate-400 font-bold text-xs uppercase tracking-widest underline decoration-2 underline-offset-4">Change Account</button>
             </div>
@@ -243,6 +268,14 @@ export default function AdminDashboard() {
                         <div>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Users</p>
                             <p className="text-xl font-black dark:text-white leading-none">{activeUsers.length}</p>
+                        </div>
+                    </div>
+                    {/* Restaurants */}
+                    <div onClick={() => setActiveModal('restaurants')} className="bg-white dark:bg-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800 p-4 rounded-[1.5rem] md:rounded-2xl shadow-sm border border-transparent md:border-slate-100 md:dark:border-slate-800 cursor-pointer active:scale-95 transition-all flex flex-col items-start gap-3">
+                        <div className="bg-rose-50 dark:bg-rose-500/10 p-2.5 rounded-xl text-rose-500"><Store size={16} /></div>
+                        <div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Restaurants</p>
+                            <p className="text-xl font-black dark:text-white leading-none">{restaurants.length}</p>
                         </div>
                     </div>
                     {/* System */}
@@ -534,7 +567,7 @@ export default function AdminDashboard() {
                                                         <span className="font-black text-lg dark:text-white">₹{sysSettings.perKmRate}</span>
                                                     )}
                                                 </div>
-                                                <div className="flex justify-between items-center pt-2">
+                                                <div className="flex justify-between items-center pb-4 border-b dark:border-slate-800">
                                                     <div>
                                                         <span className="font-bold text-sm block dark:text-slate-300">Surge Multiplier</span>
                                                         <span className="text-[10px] text-slate-400 font-bold block mt-1">1.0x = Normal, 1.5x = +50%</span>
@@ -547,10 +580,48 @@ export default function AdminDashboard() {
                                                 </div>
                                             </div>
 
+                                            <div className="mt-6 pt-4 border-t-4 border-slate-50 dark:border-slate-800/50 border-dashed">
+                                                <div className="mb-4">
+                                                    <h4 className="font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest text-xs mb-1">Quick Delivery Locations</h4>
+                                                    <p className="text-[10px] text-slate-400 font-bold">These chips appear on the Student App to fast-fill addresses.</p>
+                                                </div>
+
+                                                {editingPricing && (
+                                                    <div className="flex gap-2 mb-4">
+                                                        <input
+                                                            type="text"
+                                                            value={quickLocInput}
+                                                            onChange={e => setQuickLocInput(e.target.value)}
+                                                            placeholder="Add new location..."
+                                                            className="flex-1 bg-slate-50 dark:bg-slate-950 p-3 rounded-xl text-sm font-bold border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 ring-orange-200"
+                                                        />
+                                                        <button
+                                                            onClick={() => { if (quickLocInput) { setNewPricing(p => ({ ...p, quickLocations: [...p.quickLocations, quickLocInput] })); setQuickLocInput(""); } }}
+                                                            className="bg-slate-800 text-white px-4 py-3 rounded-xl font-bold text-xs"
+                                                        >Add</button>
+                                                    </div>
+                                                )}
+
+                                                <div className="flex flex-wrap gap-2">
+                                                    {(editingPricing ? newPricing.quickLocations : sysSettings.quickLocations).map((loc, i) => (
+                                                        <div key={i} className="flex items-center gap-1 bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 px-3 py-1.5 rounded-lg border border-blue-100 dark:border-slate-700 font-black text-xs tracking-wide">
+                                                            {loc}
+                                                            {editingPricing && (
+                                                                <button onClick={() => setNewPricing(p => ({ ...p, quickLocations: p.quickLocations.filter((_, idx) => idx !== i) }))} className="ml-2 text-blue-400 hover:text-red-500"><X size={12} /></button>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
                                             {editingPricing && (
                                                 <div className="flex gap-3 mt-8">
                                                     <button onClick={() => { setEditingPricing(false); setNewPricing(sysSettings); }} className="flex-1 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 uppercase tracking-wider text-xs">Cancel</button>
-                                                    <button onClick={() => { updateDoc(doc(db, "settings", "global"), newPricing); setEditingPricing(false); }} className="flex-1 py-3 rounded-xl font-black text-white bg-green-500 uppercase tracking-wider text-xs shadow-lg shadow-green-500/20">Save</button>
+                                                    <button onClick={() => {
+                                                        updateDoc(doc(db, "settings", "global"), { baseFare: newPricing.baseFare, perKmRate: newPricing.perKmRate, surgeMultiplier: newPricing.surgeMultiplier });
+                                                        setDoc(doc(db, "settings", "appSettings"), { quickLocations: newPricing.quickLocations }, { merge: true });
+                                                        setEditingPricing(false);
+                                                    }} className="flex-1 py-3 rounded-xl font-black text-white bg-green-500 uppercase tracking-wider text-xs shadow-lg shadow-green-500/20">Save</button>
                                                 </div>
                                             )}
                                         </div>
@@ -671,6 +742,44 @@ export default function AdminDashboard() {
                                         })()}
                                     </div>
                                 )}
+
+                                {activeModal === 'restaurants' && (
+                                    <div className="space-y-6">
+                                        <button onClick={() => setShowAddRestaurant(true)} className="w-full bg-slate-900 border border-slate-800 p-5 rounded-[2rem] text-white flex justify-between items-center shadow-lg active:scale-95 transition-transform mb-6">
+                                            <div className="flex flex-col items-start gap-1">
+                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Add New</span>
+                                                <span className="text-lg font-black flex items-center gap-2"><Store size={18} /> Register Restaurant</span>
+                                            </div>
+                                            <ChevronRight className="text-slate-500" />
+                                        </button>
+
+                                        {restaurants.length === 0 ? (
+                                            <div className="text-center p-8 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl">
+                                                <p className="text-xs font-bold text-slate-400 uppercase">No restaurants found</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                {restaurants.map(r => (
+                                                    <div key={r.id} className="bg-slate-50 dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm">
+                                                        <div>
+                                                            <h4 className="font-black text-lg dark:text-white leading-none mb-1">{r.name}</h4>
+                                                            <a href={`/restaurant`} target="_blank" className="text-[10px] font-bold text-blue-500 hover:underline">Go to Dashboard →</a>
+                                                            <div className="flex items-center gap-2 mt-3">
+                                                                <span className={`px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest ${r.isOnline ? 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400' : 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400'}`}>
+                                                                    {r.isOnline ? 'ONLINE' : 'OFFLINE'}
+                                                                </span>
+                                                                <span className="text-xs font-bold text-slate-400">{r.menuImages?.length || 0} Menu Images</span>
+                                                            </div>
+                                                        </div>
+                                                        <button onClick={() => deleteDoc(doc(db, "restaurants", r.id))} className="p-3 bg-red-50 dark:bg-red-500/10 text-red-500 rounded-xl hover:bg-red-100 transition-colors">
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </>
@@ -704,6 +813,113 @@ export default function AdminDashboard() {
                             </div>
                             <button type="submit" className="w-full bg-orange-500 text-white font-black uppercase tracking-widest text-xs py-4 rounded-2xl mt-2 active:scale-95 transition-transform">
                                 Create Account
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {showAddRestaurant && (
+                <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-black dark:text-white">New Restaurant</h3>
+                            <button onClick={() => setShowAddRestaurant(false)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-500 hover:text-slate-800 dark:hover:text-white">
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!newRestaurant.name) return;
+
+                            setUploadingRestaurant(true);
+                            try {
+                                const slug = newRestaurant.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+                                // Compress images to stay under Firestore 1MB limits
+                                const compressImage = (file: File): Promise<string> => {
+                                    return new Promise((resolve, reject) => {
+                                        const reader = new FileReader();
+                                        reader.readAsDataURL(file);
+                                        reader.onload = (e) => {
+                                            const img = new window.Image();
+                                            img.src = e.target?.result as string;
+                                            img.onload = () => {
+                                                const canvas = document.createElement('canvas');
+                                                const MAX_WIDTH = 800; // Cap width
+                                                let width = img.width;
+                                                let height = img.height;
+
+                                                if (width > MAX_WIDTH) {
+                                                    height = Math.round((height * MAX_WIDTH) / width);
+                                                    width = MAX_WIDTH;
+                                                }
+
+                                                canvas.width = width;
+                                                canvas.height = height;
+                                                const ctx = canvas.getContext('2d');
+                                                ctx?.drawImage(img, 0, 0, width, height);
+
+                                                // Convert to 60% quality JPEG inline string
+                                                resolve(canvas.toDataURL('image/jpeg', 0.6));
+                                            };
+                                            img.onerror = reject;
+                                        };
+                                        reader.onerror = reject;
+                                    });
+                                };
+
+                                const imageUrls: string[] = [];
+                                for (let i = 0; i < menuFiles.length; i++) {
+                                    const base64Compressed = await compressImage(menuFiles[i]);
+                                    imageUrls.push(base64Compressed);
+                                }
+
+                                await setDoc(doc(db, "restaurants", slug), {
+                                    name: newRestaurant.name,
+                                    isOnline: false,
+                                    menuImages: imageUrls,
+                                    createdAt: serverTimestamp()
+                                });
+
+                                setShowAddRestaurant(false);
+                                setNewRestaurant({ name: "" });
+                                setMenuFiles([]);
+                            } catch (error) {
+                                console.error("Error adding restaurant:", error);
+                                alert("Failed to add restaurant. Make sure you updated your Firebase rules!");
+                            } finally {
+                                setUploadingRestaurant(false);
+                            }
+                        }} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Display Name</label>
+                                <input required type="text" value={newRestaurant.name} onChange={e => setNewRestaurant({ ...newRestaurant, name: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 text-sm font-bold dark:text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all" placeholder="Nescafe" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Upload Menu Images (JPG/PNG)</label>
+                                <div className="w-full bg-slate-50 dark:bg-slate-950 border border-dashed border-slate-300 dark:border-slate-700 hover:border-orange-500 dark:hover:border-orange-500 rounded-2xl p-4 text-center cursor-pointer transition-colors relative overflow-hidden">
+                                    <input
+                                        type="file"
+                                        multiple
+                                        accept="image/jpeg, image/jpg, image/png"
+                                        onChange={(e) => {
+                                            if (e.target.files) {
+                                                setMenuFiles(Array.from(e.target.files));
+                                            }
+                                        }}
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                    />
+                                    <UploadCloud className="mx-auto text-slate-400 mb-2" size={24} />
+                                    <span className="text-sm font-bold text-slate-600 dark:text-slate-300">
+                                        {menuFiles.length > 0 ? `${menuFiles.length} file(s) selected` : 'Drop files or click to browse'}
+                                    </span>
+                                </div>
+                            </div>
+                            <button disabled={uploadingRestaurant} type="submit" className="w-full bg-orange-500 text-white font-black uppercase tracking-widest text-xs py-4 rounded-2xl mt-2 active:scale-95 transition-transform disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+                                {uploadingRestaurant ? <Loader2 size={16} className="animate-spin" /> : null}
+                                {uploadingRestaurant ? 'Uploading & Saving...' : 'Register Restaurant'}
                             </button>
                         </form>
                     </div>
